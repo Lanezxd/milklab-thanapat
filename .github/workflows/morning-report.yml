@@ -3,6 +3,7 @@ on:
   schedule:
     - cron: "0 0 * * *" # รันทุกเที่ยงคืน UTC (หรือ 7 โมงเช้าไทย)
   workflow_dispatch:     # อนุญาตให้คุณกดรันด้วยมือเองได้ด้วย
+
 jobs:
   run-logger:
     runs-on: ubuntu-latest
@@ -10,15 +11,54 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: '3.11' }
+      
+      # 🌟 ติดตั้ง gspread และ requests สำหรับต่อฐานข้อมูลและยิง API
       - run: pip install gspread python-dotenv requests
-      - name: Run Sales Logger
+      
+      - name: Run Sales Logger Morning Report
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
           GOOGLE_SERVICE_ACCOUNT_JSON_B64: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON_B64 }}
         run: |
-          # สร้างไฟล์ JSON จาก Secret ที่เก็บไว้
-          echo $GOOGLE_SERVICE_ACCOUNT_JSON_B64 | base64 -d > credentials.json
-          # รันคำสั่งทดสอบ (คุณเปลี่ยนค่าตรงนี้ได้ตามต้องการ)
-          python3 sales_logger.py --menu "Auto-Report" --qty 1 --price 0
+          cat << 'EOF' > run_report.py
+          import sales_logger
+          import re
+
+          try:
+              # 1. ดึงรายงานแบบข้อความจริงของเมื่อวาน
+              report = sales_logger.get_yesterday_total_sales()
+              print(f"Fetching Report: {report}")
+              
+              # 2. ยิงแจ้งเตือนข้อความรายงานตัวเลขเข้าห้องแชท Telegram
+              sales_logger.send_notification(f"🔔 [Morning Report]\n{report}")
+              print("Telegram Notification Sent Successfully!")
+              
+              # 3. 🎯 ค้นหาตัวเลขแบบเจาะจงตำแหน่งเพื่อไม่ให้หลงกับเลขวันที่
+              match_qty = re.search(r"ขายได้รวม\s*(\d+)", report)
+              match_rev = re.search(r"ยอดเงินสุทธิ\s*([\d\.]+)", report)
+              
+              if match_qty and match_rev:
+                  actual_qty = int(match_qty.group(1))         # แกะได้เลขชิ้น (เช่น 37)
+                  actual_revenue = float(match_rev.group(1))   # แกะได้เลขเงิน (เช่น 2870.0)
+                  # คำนวณหาราคาเฉลี่ย เพื่อให้ระบบ append_to_sheet คูณกลับมาได้ยอดรวมสุทธิที่ถูกต้อง
+                  unit_price = actual_revenue / actual_qty if actual_qty > 0 else 0.0
+              else:
+                  actual_qty = 0
+                  unit_price = 0.0
+              
+              # 4. บันทึกข้อมูลลง Google Sheets แบบแยกช่องคอลัมน์อย่างแม่นยำ
+              sales_logger.append_to_sheet(
+                  menu="🔔 [Summary Log] ยอดขายรวมประจำวัน", 
+                  qty=actual_qty, 
+                  price=unit_price
+              )
+              print(f"Successfully appended Row: Qty={actual_qty}, Total={actual_qty * unit_price}")
+              
+          except Exception as e:
+              print(f"Error occurred: {e}")
+          EOF
+
+          # 🚀 สั่งรันสคริปต์ Python
+          python3 run_report.py
