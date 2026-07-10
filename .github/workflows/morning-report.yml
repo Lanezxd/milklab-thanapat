@@ -12,7 +12,7 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: '3.11' }
       
-      # 🌟 ติดตั้ง gspread และ requests สำหรับต่อฐานข้อมูลและยิง API (เสถียรและเร็วที่สุด)
+      # 🌟 ติดตั้ง gspread และ requests สำหรับต่อฐานข้อมูลและยิง API
       - run: pip install gspread python-dotenv requests
       
       - name: Run Sales Logger Morning Report
@@ -22,21 +22,42 @@ jobs:
           GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
           GOOGLE_SERVICE_ACCOUNT_JSON_B64: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON_B64 }}
         run: |
-          # 🚀 ดึงสถิติจริง ➡️ ส่งเข้า Telegram ➡️ แยกแกะตัวเลขดิบหยอดลงแต่ละคอลัมน์ของตารางชีต
-          python3 -c "
+          # 📝 สร้างสคริปต์ Python แยกออกมาเพื่อตัดปัญหาเครื่องหมายคำพูดซ้อนกันใน YAML
+          cat << 'EOF' > run_report.py
           import sales_logger
           import re
+
           try:
               # 1. ดึงรายงานแบบข้อความจริงของเมื่อวาน
               report = sales_logger.get_yesterday_total_sales()
-              print(f'Fetching Report: {report}')
+              print(f"Fetching Report: {report}")
               
               # 2. ยิงแจ้งเตือนข้อความรายงานตัวเลขเข้าห้องแชท Telegram
-              sales_logger.send_notification(f'🔔 [Morning Report]\n{report}')
-              print('Telegram Notification Sent Successfully!')
+              sales_logger.send_notification(f"🔔 [Morning Report]\n{report}")
+              print("Telegram Notification Sent Successfully!")
               
               # 3. ใช้ Regex ถอดรหัสแกะตัวเลขดิบออกจากสายอักขระเพื่อหยอดแยกคอลัมน์
-              # ข้อความรูปแบบ: สรุปยอดขายเมื่อวาน (YYYY-MM-DD) ขายได้รวม X ชิ้น ยอดเงินสุทธิ Y บาท
               numbers = [float(s) for s in re.findall(r'-?\d+\.?\d*', report)]
               
-              # ป้องกันข้อผิดพลาดกรณีดึงตัวเลขไม่ได้หรือเป็นข้อ
+              if len(numbers) >= 3:
+                  actual_qty = int(numbers[1])       
+                  actual_revenue = float(numbers[2])  
+                  unit_price = actual_revenue / actual_qty if actual_qty > 0 else 0.0
+              else:
+                  actual_qty = 0
+                  unit_price = 0.0
+              
+              # 4. อัปเดตข้อมูลบันทึกประวัติแบบแยกช่องตาราง Google Sheets อย่างชัดเจน
+              sales_logger.append_to_sheet(
+                  menu="🔔 [Summary Log] ยอดขายรวมประจำวัน", 
+                  qty=actual_qty, 
+                  price=unit_price
+              )
+              print("Separated Summary Row Appended to Google Sheets Successfully!")
+              
+          except Exception as e:
+              print(f"Error occurred: {e}")
+          EOF
+
+          # 🚀 สั่งรันสคริปต์ Python ที่เพิ่งสร้างขึ้นมา
+          python3 run_report.py
