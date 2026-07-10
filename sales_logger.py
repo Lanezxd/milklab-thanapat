@@ -5,7 +5,7 @@ import requests
 import gspread
 import base64
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -57,6 +57,59 @@ def send_notification(message: str) -> str:
         raise RuntimeError(f"Telegram API Error: {response.text}")
 
     return "telegram"
+
+
+# 🚀 🌟 ฟังก์ชันเพิ่มเติมสำหรับคำนวณและสรุปยอดขายเมื่อวานจริงจาก Google Sheets
+def get_yesterday_total_sales() -> str:
+    """เปิดอ่าน Google Sheets และตรวจสอบข้อมูลเพื่อสรุปยอดขายของเมื่อวานย้อนหลัง 1 วัน"""
+    try:
+        sheet_id = os.getenv("GOOGLE_SHEETS_ID")
+
+        if os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_B64"):
+            creds_b64 = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_B64")
+            creds_dict = json.loads(base64.b64decode(creds_b64))
+            gc = gspread.service_account_from_dict(creds_dict)
+        elif os.path.exists("credentials/milk-lab-0df755c40bc9.json"):
+            gc = gspread.service_account(
+                filename="credentials/milk-lab-0df755c40bc9.json")
+        else:
+            return "ไม่พบ Credentials สำหรับเข้าถึง Google Sheets"
+
+        sh = gc.open_by_key(sheet_id)
+        worksheet = sh.sheet1
+
+        # ดึงแถวข้อมูลทั้งหมดในแผ่นงาน
+        all_rows = worksheet.get_all_values()
+        if len(all_rows) <= 1:
+            return "ยังไม่มีข้อมูลบันทึกการขายใดๆ ในระบบตาราง"
+
+        # หารูปแบบสตริงวันที่ของเมื่อวาน (ฟอร์แมต YYYY-MM-DD)
+        yesterday_str = (datetime.now() - timedelta(days=1)
+                         ).strftime("%Y-%m-%d")
+
+        total_revenue = 0.0
+        total_qty = 0
+
+        # วนลูปตรวจสอบข้อมูลตั้งแต่แถวที่ 2 เป็นต้นไป (ข้ามหัวตาราง index 0)
+        for row in all_rows[1:]:
+            if len(row) >= 5:
+                timestamp = row[0]  # คอลัมน์ที่ 1 คือวันเวลาที่บันทึก
+                if timestamp.startswith(yesterday_str):
+                    try:
+                        # คอลัมน์ที่ 3 คือจำนวนชิ้น
+                        total_qty += int(row[2])
+                        # คอลัมน์ที่ 5 คือราคารวมสุทธิของรายการนั้น
+                        total_revenue += float(row[4])
+                    except ValueError:
+                        continue
+
+        if total_qty == 0:
+            return f"ยอดขายเมื่อวาน ({yesterday_str}) ยังไม่มีรายการบันทึกเข้ามาในระบบ"
+
+        return f"สรุปยอดขายเมื่อวาน ({yesterday_str}) ขายได้รวม {total_qty} ชิ้น ยอดเงินสุทธิ {total_revenue} บาท"
+
+    except Exception as e:
+        return f"เกิดข้อผิดพลาดในการคำนวณรายงานยอดขาย: {str(e)}"
 
 
 def main() -> int:
