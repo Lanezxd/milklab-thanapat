@@ -22,14 +22,23 @@ jobs:
           GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
           GOOGLE_SERVICE_ACCOUNT_JSON_B64: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON_B64 }}
         run: |
-          # 🚀 ใช้พลัง Python เชื่อมต่อลอจิกหลังบ้านตรงๆ ดึงรายงานจริงและยิงเข้า Telegram (ไม่เพิ่มแถวซ้ำในชีต)
+          # 🚀 อ่านข้อมูลสรุปจริง ➡️ ยิงเข้า Telegram ➡️ บันทึกประวัติลง Google Sheets ครบจบในทีเดียว
           python3 -c "
           import sales_logger
           try:
+              # 1. ดึงรายงานตัวเลขคำนวณจริงของเมื่อวานจาก Google Sheets
               report = sales_logger.get_yesterday_total_sales()
               print(f'Fetching Report: {report}')
+              
+              # 2. ส่งแจ้งเตือนข้อความสรุปนั้นเข้าสู่ Telegram
               sales_logger.send_notification(f'🔔 [Morning Report]\n{report}')
               print('Telegram Notification Sent Successfully!')
+              
+              # 3. บันทึกข้อความสรุปจริงนี้เพิ่มกลับลงไปใน Google Sheets อีก 1 แถวเพื่อเก็บประวัติ
+              # ตั้งค่า qty=1 และ price=0.0 เพื่อให้ตัวเลขรวมในระบบบัญชีวันถัดไปไม่คลาดเคลื่อน
+              sales_logger.append_to_sheet(menu=f'🔔 [Morning Report] {report}', qty=1, price=0.0)
+              print('Summary Row Appended to Google Sheets Successfully!')
+              
           except Exception as e:
               print(f'Error occurred: {e}')
           "
