@@ -12,28 +12,24 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: '3.11' }
       
-      # 🌟 ติดตั้ง Dependencies ที่จำเป็นให้ครบถ้วนเพื่อรันระบบ Agent
-      - run: pip install gspread python-dotenv requests google-genai
+      # 🌟 ติดตั้ง gspread และ requests สำหรับต่อฐานข้อมูลและยิง API (เสถียรและเร็วที่สุด)
+      - run: pip install gspread python-dotenv requests
       
-      - name: Run Sales Logger
+      - name: Run Sales Logger Morning Report
         env:
-          GEMINI_API_KEY: ${{ secrets.GOOGLE_API_KEY }}  # 🔑 คีย์เอไอสำหรับประมวลผลคำสั่งหน้าบ้าน
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
           GOOGLE_SERVICE_ACCOUNT_JSON_B64: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON_B64 }}
         run: |
-          # 📁 ถอดรหัสไฟล์สิทธิ์กูเกิลชีทลงโฟลเดอร์ตามโครงสร้างสคริปต์หลัก
-          mkdir -p credentials
-          echo "$GOOGLE_SERVICE_ACCOUNT_JSON_B64" | base64 -d > credentials/milk-lab-0df755c40bc9.json
-          
-          # 🚀 1. สั่งรันคำสั่งผ่านหน้าบ้านเพื่อดึงรายงานคำนวณจริง แล้วกรองจับเอาเฉพาะบรรทัดสรุปผลลัพธ์สุดท้าย
-          REPORT_OUTPUT=$(python3 agent_harness.py --cmd "ขอสรุปยอดขายเมื่อวานหน่อย" | grep "\[USER\]" -A 2 | tail -n 1 | sed 's/\[USER\] ← //')
-          
-          # 🌟 กรณีตรวจสอบแล้วไม่พบข้อความ ให้ระบุค่าเริ่มต้นเพื่อป้องกันข้อผิดพลาด
-          if [ -z "$REPORT_OUTPUT" ]; then
-            REPORT_OUTPUT="ไม่สามารถดึงรายงานสรุปยอดขายได้ โปรดตรวจสอบระบบฐานข้อมูล"
-          fi
-          
-          # 🔔 2. บังคับยิงข้อความรายงานผลรวมตัวเลขจริงส่งตรงเข้าระบบแจ้งเตือนของ Telegram Bot ทันที
-          python3 sales_logger.py --menu "🔔 [Morning Report] $REPORT_OUTPUT" --qty 1 --price 0
+          # 🚀 ใช้พลัง Python เชื่อมต่อลอจิกหลังบ้านตรงๆ ดึงรายงานจริงและยิงเข้า Telegram (ไม่เพิ่มแถวซ้ำในชีต)
+          python3 -c "
+          import sales_logger
+          try:
+              report = sales_logger.get_yesterday_total_sales()
+              print(f'Fetching Report: {report}')
+              sales_logger.send_notification(f'🔔 [Morning Report]\n{report}')
+              print('Telegram Notification Sent Successfully!')
+          except Exception as e:
+              print(f'Error occurred: {e}')
+          "
