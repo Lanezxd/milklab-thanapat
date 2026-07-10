@@ -22,7 +22,6 @@ jobs:
           GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
           GOOGLE_SERVICE_ACCOUNT_JSON_B64: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON_B64 }}
         run: |
-          # 📝 สร้างสคริปต์ Python แยกออกมาเพื่อตัดปัญหาเครื่องหมายคำพูดซ้อนกันใน YAML
           cat << 'EOF' > run_report.py
           import sales_logger
           import re
@@ -36,28 +35,30 @@ jobs:
               sales_logger.send_notification(f"🔔 [Morning Report]\n{report}")
               print("Telegram Notification Sent Successfully!")
               
-              # 3. ใช้ Regex ถอดรหัสแกะตัวเลขดิบออกจากสายอักขระเพื่อหยอดแยกคอลัมน์
-              numbers = [float(s) for s in re.findall(r'-?\d+\.?\d*', report)]
+              # 3. 🎯 ค้นหาตัวเลขแบบเจาะจงตำแหน่งเพื่อไม่ให้หลงกับเลขวันที่
+              match_qty = re.search(r"ขายได้รวม\s*(\d+)", report)
+              match_rev = re.search(r"ยอดเงินสุทธิ\s*([\d\.]+)", report)
               
-              if len(numbers) >= 3:
-                  actual_qty = int(numbers[1])       
-                  actual_revenue = float(numbers[2])  
+              if match_qty and match_rev:
+                  actual_qty = int(match_qty.group(1))         # แกะได้เลขชิ้น (เช่น 37)
+                  actual_revenue = float(match_rev.group(1))   # แกะได้เลขเงิน (เช่น 2870.0)
+                  # คำนวณหาราคาเฉลี่ย เพื่อให้ระบบ append_to_sheet คูณกลับมาได้ยอดรวมสุทธิที่ถูกต้อง
                   unit_price = actual_revenue / actual_qty if actual_qty > 0 else 0.0
               else:
                   actual_qty = 0
                   unit_price = 0.0
               
-              # 4. อัปเดตข้อมูลบันทึกประวัติแบบแยกช่องตาราง Google Sheets อย่างชัดเจน
+              # 4. บันทึกข้อมูลลง Google Sheets แบบแยกช่องคอลัมน์อย่างแม่นยำ
               sales_logger.append_to_sheet(
                   menu="🔔 [Summary Log] ยอดขายรวมประจำวัน", 
                   qty=actual_qty, 
                   price=unit_price
               )
-              print("Separated Summary Row Appended to Google Sheets Successfully!")
+              print(f"Successfully appended Row: Qty={actual_qty}, Total={actual_qty * unit_price}")
               
           except Exception as e:
               print(f"Error occurred: {e}")
           EOF
 
-          # 🚀 สั่งรันสคริปต์ Python ที่เพิ่งสร้างขึ้นมา
+          # 🚀 สั่งรันสคริปต์ Python
           python3 run_report.py
