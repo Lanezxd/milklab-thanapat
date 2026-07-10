@@ -12,20 +12,28 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: '3.11' }
       
-      # 🌟 เพิ่ม google-genai ในการติดตั้ง เพื่อให้สคริปต์หน้าบ้านดึงโมดูล AI มารัน Agent Router ได้
+      # 🌟 ติดตั้ง Dependencies ที่จำเป็นให้ครบถ้วนเพื่อรันระบบ Agent
       - run: pip install gspread python-dotenv requests google-genai
       
       - name: Run Sales Logger
         env:
-          GEMINI_API_KEY: ${{ secrets.GOOGLE_API_KEY }}  # 🔑 เพิ่มคีย์เอไอเพื่อให้หน้าบ้านใช้งานได้
+          GEMINI_API_KEY: ${{ secrets.GOOGLE_API_KEY }}  # 🔑 คีย์เอไอสำหรับประมวลผลคำสั่งหน้าบ้าน
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
           GOOGLE_SERVICE_ACCOUNT_JSON_B64: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON_B64 }}
         run: |
-          # 📁 สร้างโฟลเดอร์และไฟล์ JSON จาก Secret ให้ตรงตาม Path ที่สคริปต์ใช้ดึงข้อมูลจริง
+          # 📁 ถอดรหัสไฟล์สิทธิ์กูเกิลชีทลงโฟลเดอร์ตามโครงสร้างสคริปต์หลัก
           mkdir -p credentials
           echo "$GOOGLE_SERVICE_ACCOUNT_JSON_B64" | base64 -d > credentials/milk-lab-0df755c40bc9.json
           
-          # 🚀 เปลี่ยนจากการป้อนคำสั่งทื่อๆ เป็นการสั่งให้ Agent สรุปยอดขายจริงย้อนหลัง 1 วันจากตารางกูเกิลชีท
-          python3 agent_harness.py --cmd "ขอสรุปยอดขายเมื่อวานหน่อย"
+          # 🚀 1. สั่งรันคำสั่งผ่านหน้าบ้านเพื่อดึงรายงานคำนวณจริง แล้วกรองจับเอาเฉพาะบรรทัดสรุปผลลัพธ์สุดท้าย
+          REPORT_OUTPUT=$(python3 agent_harness.py --cmd "ขอสรุปยอดขายเมื่อวานหน่อย" | grep "\[USER\]" -A 2 | tail -n 1 | sed 's/\[USER\] ← //')
+          
+          # 🌟 กรณีตรวจสอบแล้วไม่พบข้อความ ให้ระบุค่าเริ่มต้นเพื่อป้องกันข้อผิดพลาด
+          if [ -z "$REPORT_OUTPUT" ]; then
+            REPORT_OUTPUT="ไม่สามารถดึงรายงานสรุปยอดขายได้ โปรดตรวจสอบระบบฐานข้อมูล"
+          fi
+          
+          # 🔔 2. บังคับยิงข้อความรายงานผลรวมตัวเลขจริงส่งตรงเข้าระบบแจ้งเตือนของ Telegram Bot ทันที
+          python3 sales_logger.py --menu "🔔 [Morning Report] $REPORT_OUTPUT" --qty 1 --price 0
