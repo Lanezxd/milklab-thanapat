@@ -24,7 +24,10 @@ def log_sale(menu, quantity, price):
     # 2. Wrapper: จัดการตรวจสอบความถูกต้องก่อนส่งไปทำ Action หลังบ้าน
     err = _validate_sale(menu, quantity, price)
     if err:
-        return {'ok': False, 'tool': 'log_sale', 'error': err}
+        # 🎯 ปรับแก้ตรงจุดนี้: ให้พ่นข้อความสตริงเพื่อปฏิเสธตรงตัวอักษรแทนการส่ง Dict กลับไป
+        if err == 'qty > 0':
+            return "ปฏิเสธการบันทึก: ตรวจพบข้อผิดพลาดด้านความถูกต้องของข้อมูล (qty > 0)"
+        return f"ปฏิเสธการบันทึก: ตรวจพบข้อผิดพลาดด้านความถูกต้องของข้อมูล ({err})"
 
     try:
         # เรียกใช้งานฟังก์ชันหลักใน sales_logger.py เพื่อบันทึกลง Google Sheets
