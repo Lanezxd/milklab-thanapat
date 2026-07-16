@@ -84,8 +84,7 @@ def get_yesterday_total_sales() -> str:
             return "ยังไม่มีข้อมูลบันทึกการขายใดๆ ในระบบตาราง"
 
         # หารูปแบบสตริงวันที่ของเมื่อวาน (ฟอร์แมต YYYY-MM-DD)
-        yesterday_str = (datetime.now() - timedelta(days=1)
-                         ).strftime("%Y-%m-%d")
+        yesterday_str = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
 
         total_revenue = 0.0
         total_qty = 0
@@ -94,6 +93,12 @@ def get_yesterday_total_sales() -> str:
         for row in all_rows[1:]:
             if len(row) >= 5:
                 timestamp = row[0]  # คอลัมน์ที่ 1 คือวันเวลาที่บันทึก
+                menu_name = row[1]  # คอลัมน์ที่ 2 คือชื่อเมนูสินค้า
+                
+                # 🎯 เพิ่ม Guardrail ป้องกันการดึงเอาแถว Summary Log เก่าของวันก่อนหน้ามาคำนวณซ้ำ
+                if "[Summary Log]" in menu_name or "🔔" in menu_name:
+                    continue
+
                 if timestamp.startswith(yesterday_str):
                     try:
                         # คอลัมน์ที่ 3 คือจำนวนชิ้น
