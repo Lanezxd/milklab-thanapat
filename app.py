@@ -75,7 +75,7 @@ st.markdown("""
 # ส่วนหัวของแอป (Minimal Blue Header)
 st.markdown("""
     <div class="title-container">
-        <h1>🥛 MilkLab </h1>
+        <h1>🥛 MilkLab° </h1>
         <p>ถามตอบเมนู ราคา และข้อมูลร้าน</p>
     </div>
 """, unsafe_allow_html=True)
@@ -133,7 +133,7 @@ def retrieve_top_k(query: str, k: int = 3):
 # ---------------------------------------------------------
 if "messages" not in st.session_state:
     st.session_state.messages = [
-        {"role": "assistant", "content": "สวัสดีครับ! ยินดีต้อนรับสู่ MilkLab° สอบถามเมนู ราคา เวลาเปิด-ปิด หรือส่วนผสมกับน้องมิลค์ได้เลยครับ "}
+        {"role": "assistant", "content": "สวัสดีครับ! ยินดีต้อนรับสู่ MilkLab° สอบถามเมนู ราคา เวลาเปิด-ปิด หรือส่วนผสมกับน้องมิลค์ได้เลยครับ 🥛"}
     ]
 
 # แสดงประวัติการสนทนา
@@ -143,7 +143,7 @@ for msg in st.session_state.messages:
         st.write(msg["content"])
 
 # ส่วนรับคำถามจากผู้ใช้
-if user_input := st.chat_input("สอบถามข้อมูลร้าน"):
+if user_input := st.chat_input("สอบถามข้อมูลร้าน..."):
     # บันทึกและแสดงคำถามผู้ใช้
     st.session_state.messages.append({"role": "user", "content": user_input})
     with st.chat_message("user", avatar="👤"):
@@ -164,8 +164,13 @@ if user_input := st.chat_input("สอบถามข้อมูลร้าน
 {user_input}
 """
 
-    # 4.3 เรียก Gemini API (ดึงได้ทั้ง GEMINI_API_KEY และ GOOGLE_API_KEY จาก Codespaces Secrets)
-    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    # 4.3 ดึง API Key จากทั้ง Environment Variables และ Streamlit Secrets
+    api_key = (
+        os.getenv("GEMINI_API_KEY") or 
+        os.getenv("GOOGLE_API_KEY") or 
+        st.secrets.get("GEMINI_API_KEY") or 
+        st.secrets.get("GOOGLE_API_KEY")
+    )
     
     with st.chat_message("assistant", avatar="🥛"):
         if not api_key:
@@ -174,8 +179,9 @@ if user_input := st.chat_input("สอบถามข้อมูลร้าน
         else:
             try:
                 client = genai.Client(api_key=api_key)
+                # แก้ไขชื่อโมเดลเป็น gemini-2.0-flash
                 response = client.models.generate_content(
-                    model="gemini-2.5-flash",
+                    model="gemini-2.0-flash",
                     contents=prompt
                 )
                 bot_response = response.text
@@ -186,8 +192,3 @@ if user_input := st.chat_input("สอบถามข้อมูลร้าน
 
     # บันทึกคำตอบลง Session State
     st.session_state.messages.append({"role": "assistant", "content": bot_response})
-
-     # แสดง Context ด้านล่างแบบมินิมอลเพื่อตรวจสอบ Retrieval
-    # with st.expander("🔍 ตรวจสอบ Context ที่ดึงมาใช้งาน (Top-3 Chunks)"):
-    #     for i, chunk in enumerate(retrieved_context, 1):
-    #         st.info(f"**Chunk {i}:**\n{chunk}")
