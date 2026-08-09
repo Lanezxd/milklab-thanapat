@@ -1,7 +1,8 @@
 import os
+import re
+import math
+from collections import Counter
 import streamlit as st
-import faiss
-import numpy as np
 from dotenv import load_dotenv
 from google import genai
 
@@ -9,7 +10,7 @@ from google import genai
 load_dotenv(override=True)
 
 # ---------------------------------------------------------
-# 1. ตั้งค่าหน้าตา Streamlit
+# 1. ตั้งค่าหน้าตา Streamlit (มินิมอล โทนฟ้า-ขาว)
 # ---------------------------------------------------------
 st.set_page_config(
     page_title="MilkLab° RAG Chatbot",
@@ -17,7 +18,6 @@ st.set_page_config(
     layout="centered"
 )
 
-# Custom CSS ตกแต่งธีม มินิมอล
 st.markdown("""
     <style>
     .stApp {
@@ -71,79 +71,65 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 2. Helper Functions & Cache Gemini Client
+# 2. RAG Pipeline: Lightweight Chunking & Pure Python Retrieval
 # ---------------------------------------------------------
 @st.cache_resource
-def get_genai_client():
-    api_key = os.getenv("GOOGLE_API_KEY")
-    if not api_key:
-        return None
-    return genai.Client(api_key=api_key)
-
-def get_embedding(client, text_list: list[str]) -> np.ndarray:
-    """ส่งข้อความไปทำ Vector Embedding ผ่าน Gemini API (ไม่กิน RAM เครื่อง)"""
-    embeddings = []
-    for item in text_list:
-        res = client.models.embed_content(
-            model="text-embedding-004",
-            contents=item
-        )
-        embeddings.append(res.embeddings[0].values)
-    return np.array(embeddings, dtype=np.float32)
-
-# ---------------------------------------------------------
-# 3. RAG Pipeline: Chunking & FAISS Vector Store
-# ---------------------------------------------------------
-@st.cache_resource(show_spinner="กำลังจัดเตรียมคลังข้อมูล RAG...")
-def init_rag_pipeline():
+def load_knowledge_chunks():
     kb_path = "menu_kb.md"
     if not os.path.exists(kb_path):
         st.error(f"⚠️ ไม่พบไฟล์คลังข้อมูล {kb_path}")
-        return None, []
-
-    client = get_genai_client()
-    if not client:
-        return None, []
+        return []
 
     with open(kb_path, "r", encoding="utf-8") as f:
         text = f.read()
 
     raw_chunks = text.split("\n\n")
     chunks = [c.strip() for c in raw_chunks if c.strip()]
+    return chunks
 
-    # แปลง Chunk เป็น Vector ด้วย Gemini Embedding API
-    embeddings = get_embedding(client, chunks)
+chunks = load_knowledge_chunks()
 
-    # สร้าง FAISS Index
-    dimension = embeddings.shape[1]
-    index = faiss.IndexFlatL2(dimension)
-    index.add(embeddings)
+def tokenize(text: str) -> list[str]:
+    """แยกคำไทยและอังกฤษอย่างง่าย"""
+    return re.findall(r'[\u0E00-\u0E7F]+|[a-zA-Z0-9]+', text.lower())
 
-    return index, chunks
-
-index, chunks = init_rag_pipeline()
-
-# ---------------------------------------------------------
-# 4. Retrieval Function
-# ---------------------------------------------------------
-def retrieve_top_k(query: str, k: int = 3):
-    client = get_genai_client()
-    if not client or index is None or not chunks:
+def retrieve_top_k(query: str, k: int = 3) -> list[str]:
+    """ค้นหา Chunks ที่เกี่ยวข้องที่สุดด้วย Relevance Score (ไม่กิน RAM / ไม่ยิง API)"""
+    if not chunks:
         return []
     
-    query_vector = get_embedding(client, [query])
-    distances, indices = index.search(query_vector, k)
-    
-    retrieved_chunks = []
-    for idx in indices[0]:
-        if idx < len(chunks):
-            retrieved_chunks.append(chunks[idx])
-            
-    return retrieved_chunks
+    query_tokens = tokenize(query)
+    if not query_tokens:
+        return chunks[:k]
+
+    scores = []
+    for chunk in chunks:
+        chunk_text_lower = chunk.lower()
+        chunk_tokens = tokenize(chunk)
+        chunk_counts = Counter(chunk_tokens)
+        
+        score = 0
+        for token in query_tokens:
+            # คำตรงกันเป๊ะ
+            if token in chunk_counts:
+                score += chunk_counts[token] * 3
+            # คำเป็นส่วนหนึ่งของข้อความ
+            elif token in chunk_text_lower:
+                score += 1.5
+                
+        scores.append(score)
+
+    # จัดลำดับ Chunks จากคะแนนมากไปน้อย
+    ranked = [c for _, c in sorted(zip(scores, chunks), key=lambda x: x[0], reverse=True)]
+    return ranked[:k]
 
 # ---------------------------------------------------------
-# 5. UI & Chat Management
+# 3. Gemini Client & Chat State Management
 # ---------------------------------------------------------
+@st.cache_resource
+def get_genai_client(api_key: str):
+    return genai.Client(api_key=api_key)
+
 if "messages" not in st.session_state:
     st.session_state.messages = [
         {"role": "assistant", "content": "สวัสดีครับ! ยินดีต้อนรับสู่ MilkLab° สอบถามเมนู ราคา เวลาเปิด-ปิด หรือส่วนผสมกับน้องมิลค์ได้เลยครับ 🥛"}
@@ -159,6 +145,7 @@ if user_input := st.chat_input("สอบถามข้อมูลร้าน
     with st.chat_message("user", avatar="👤"):
         st.write(user_input)
 
+    # ดึง Context
     retrieved_context = retrieve_top_k(user_input, k=3)
     context_str = "\n---\n".join(retrieved_context) if retrieved_context else "ไม่มีข้อมูลใน Context"
 
@@ -180,7 +167,7 @@ if user_input := st.chat_input("สอบถามข้อมูลร้าน
             st.warning(bot_response)
         else:
             try:
-                client = get_genai_client()
+                client = get_genai_client(api_key)
                 response = client.models.generate_content(
                     model="gemini-2.0-flash",
                     contents=prompt
