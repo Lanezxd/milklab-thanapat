@@ -1,13 +1,20 @@
 import os
 import streamlit as st
+
+# ---------------------------------------------------------
+# 0. ประหยัด RAM: จำกัด Thread ของ PyTorch/OpenMP ป้องกัน Memory Spike บน Render
+# ---------------------------------------------------------
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+
 import faiss
 import numpy as np
 from dotenv import load_dotenv
 from sentence_transformers import SentenceTransformer
 from google import genai
 
-# โหลด Environment Variables จากไฟล์ .env (ถ้ามี)
-load_dotenv()
+# โหลด Environment Variables จากไฟล์ .env
+load_dotenv(override=True)
 
 # ---------------------------------------------------------
 # 1. ตั้งค่าหน้าตา Streamlit และตกแต่งสไตล์ มินิมอล โทนสีฟ้า-ขาว
@@ -83,7 +90,7 @@ st.markdown("""
 # ---------------------------------------------------------
 # 2. RAG Pipeline: Chunking, Embedding, Vector Store (FAISS)
 # ---------------------------------------------------------
-@st.cache_resource
+@st.cache_resource(show_spinner="กำลังโหลดคลังข้อมูลและโมเดล...")
 def init_rag_pipeline():
     kb_path = "menu_kb.md"
     if not os.path.exists(kb_path):
@@ -112,7 +119,14 @@ def init_rag_pipeline():
 embedder, index, chunks = init_rag_pipeline()
 
 # ---------------------------------------------------------
-# 3. Retrieval Function (ดึง top-k=3 Chunks)
+# 3. Cache Gemini Client (ประหยัด RAM จากการสร้าง Object ใหม่ซ้ำๆ)
+# ---------------------------------------------------------
+@st.cache_resource
+def get_genai_client(api_key: str):
+    return genai.Client(api_key=api_key)
+
+# ---------------------------------------------------------
+# 4. Retrieval Function (ดึง top-k=3 Chunks)
 # ---------------------------------------------------------
 def retrieve_top_k(query: str, k: int = 3):
     if not embedder or not index or not chunks:
@@ -129,7 +143,7 @@ def retrieve_top_k(query: str, k: int = 3):
     return retrieved_chunks
 
 # ---------------------------------------------------------
-# 4. Chat State Management & UI โต้ตอบ
+# 5. Chat State Management & UI โต้ตอบ
 # ---------------------------------------------------------
 if "messages" not in st.session_state:
     st.session_state.messages = [
@@ -149,11 +163,11 @@ if user_input := st.chat_input("สอบถามข้อมูลร้าน
     with st.chat_message("user", avatar="👤"):
         st.write(user_input)
 
-    # 4.1 Retrieval: ดึง top-k=3 chunks
+    # 5.1 Retrieval: ดึง top-k=3 chunks
     retrieved_context = retrieve_top_k(user_input, k=3)
     context_str = "\n---\n".join(retrieved_context) if retrieved_context else "ไม่มีข้อมูลใน Context"
 
-    # 4.2 สร้าง Gemini Prompt พร้อม Context
+    # 5.2 สร้าง Gemini Prompt พร้อม Context
     prompt = f"""คุณคือผู้ช่วย AI ประจำร้าน MilkLab° ตอบคำถามลูกค้าด้วยความสุภาพ เป็นกันเอง กระชับ และถูกต้อง
 โปรดใช้ข้อมูลจาก "เอกสารอ้างอิง (Context)" ด้านล่างนี้ในการตอบคำถามเท่านั้น หากไม่มีข้อมูลใน Context ให้ตอบตามตรงว่าไม่พบข้อมูลดังกล่าวในระบบของร้าน MilkLab°
 
@@ -164,22 +178,17 @@ if user_input := st.chat_input("สอบถามข้อมูลร้าน
 {user_input}
 """
 
-    # 4.3 เรียก Gemini API (ดึงได้จากทั้ง Environment Variables และ Streamlit Secrets)
-    api_key = (
-        os.getenv("GEMINI_API_KEY") or 
-        os.getenv("GOOGLE_API_KEY") or 
-        st.secrets.get("GEMINI_API_KEY") or 
-        st.secrets.get("GOOGLE_API_KEY")
-    )
+    # 5.3 ดึง GOOGLE_API_KEY จากไฟล์ .env
+    api_key = os.getenv("GOOGLE_API_KEY")
 
     with st.chat_message("assistant", avatar="🥛"):
         if not api_key:
-            bot_response = "⚠️ ไม่พบ GEMINI_API_KEY หรือ GOOGLE_API_KEY ในระบบ กรุณาตรวจสอบการตั้งค่า Secret ครับ"
+            bot_response = "⚠️ ไม่พบ GOOGLE_API_KEY ในไฟล์ .env กรุณาตรวจสอบการตั้งค่าครับ"
             st.warning(bot_response)
         else:
             try:
-                client = genai.Client(api_key=api_key)
-                # ใช้ชื่อรุ่น gemini-2.0-flash ที่รองรับใน SDK ตัวใหม่
+                # เรียกใช้งาน Cached Gemini Client
+                client = get_genai_client(api_key)
                 response = client.models.generate_content(
                     model="gemini-2.0-flash",
                     contents=prompt

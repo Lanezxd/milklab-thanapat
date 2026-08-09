@@ -1,5 +1,14 @@
+import os
 from datetime import datetime
+from dotenv import load_dotenv
 import sales_logger
+
+# โหลด Environment Variables จากไฟล์ .env
+load_dotenv(override=True)
+
+
+# ดึง GOOGLE_API_KEY จากไฟล์ .env
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 
 def _validate_sale(menu, qty, price):
@@ -12,8 +21,13 @@ def _validate_sale(menu, qty, price):
         return 'qty too large'
 
     # 🌟 เกราะป้องกันหลังบ้าน: ตรวจจับและสกัดคำโกง (Prompt Injection) ที่พยายามเข้ามาควบคุมระบบในชื่อเมนู
-    invalid_keywords = ["ignore instruction", "ignore instructions",
-                        "override", "system prompt", "forget rules"]
+    invalid_keywords = [
+        "ignore instruction",
+        "ignore instructions",
+        "override",
+        "system prompt",
+        "forget rules",
+    ]
     if any(kw in str(menu).lower() for kw in invalid_keywords):
         return 'malicious input detected in menu name'
 
@@ -24,7 +38,6 @@ def log_sale(menu, quantity, price):
     # 2. Wrapper: จัดการตรวจสอบความถูกต้องก่อนส่งไปทำ Action หลังบ้าน
     err = _validate_sale(menu, quantity, price)
     if err:
-        # 🎯 ปรับแก้ตรงจุดนี้: ให้พ่นข้อความสตริงเพื่อปฏิเสธตรงตัวอักษรแทนการส่ง Dict กลับไป
         if err == 'qty > 0':
             return "ปฏิเสธการบันทึก: ตรวจพบข้อผิดพลาดด้านความถูกต้องของข้อมูล (qty > 0)"
         return f"ปฏิเสธการบันทึก: ตรวจพบข้อผิดพลาดด้านความถูกต้องของข้อมูล ({err})"
@@ -32,16 +45,19 @@ def log_sale(menu, quantity, price):
     try:
         # เรียกใช้งานฟังก์ชันหลักใน sales_logger.py เพื่อบันทึกลง Google Sheets
         res = sales_logger.append_to_sheet(
-            menu=menu, qty=quantity, price=price)
+            menu=menu, qty=quantity, price=price
+        )
         total_amount = quantity * price
 
-        # 🌟 จุดที่เพิ่ม: สั่งให้ยิงแจ้งเตือนเด้งเข้ากลุ่ม Telegram ทันทีหลังบันทึกสำเร็จ
+        # 🌟 สั่งให้ยิงแจ้งเตือนเด้งเข้ากลุ่ม Telegram ทันทีหลังบันทึกสำเร็จ
         try:
             msg = f"🔔 [Agent] บันทึกขาย: {menu} x{quantity} ขวด รวมเป็นเงิน {total_amount} บาท"
             sales_logger.send_notification(msg)
         except Exception as tele_err:
             # ครอบไว้เพื่อไม่ให้ระบบพังในกรณีที่โทเค็น Telegram ใน .env แอบหลุดหรือมีปัญหา
-            print(f"[WARN] บันทึก Sheet สำเร็จแต่ส่ง Telegram พัง: {tele_err}")
+            print(
+                f"[WARN] บันทึก Sheet สำเร็จแต่ส่ง Telegram พัง: {tele_err}"
+            )
 
         # คืนค่ากลับไปในรูปแบบ Dict สมบูรณ์เพื่อให้แสดงผลในผลลัพธ์ของ Agent ได้ชัดเจน
         return {
@@ -50,13 +66,15 @@ def log_sale(menu, quantity, price):
             'menu': menu,
             'qty': quantity,
             'price': price,
-            'total': res.get('total', total_amount) if isinstance(res, dict) else total_amount
+            'total': res.get('total', total_amount)
+            if isinstance(res, dict)
+            else total_amount,
         }
     except Exception as e:
         return {'ok': False, 'tool': 'log_sale', 'error': str(e)}
 
 
-# 🚀 🌟 ฟังก์ชันจำลองสำหรับ Session 3: RAG Knowledge Base (ตรงตามโจทย์ภาพสไลด์)
+# 🚀 🌟 ฟังก์ชันจำลองสำหรับ Session 3: RAG Knowledge Base
 def search_kb(question: str) -> str:
     """ฟังก์ชันสืบค้นคลังข้อมูลความรู้เกี่ยวกับวัตถุดิบและผลิตภัณฑ์ของร้าน MilkLab"""
     q = question.lower()
@@ -78,33 +96,21 @@ TOOL_REGISTRY = {
     'log_sale': {
         'fn': log_sale,
         'args': ('menu', 'quantity', 'price'),
-        'coerce': {
-            'menu': str,
-            'quantity': int,
-            'price': float
-        }
+        'coerce': {'menu': str, 'quantity': int, 'price': float},
     },
     'record_sale': {
         'fn': log_sale,
         'args': ('menu', 'quantity', 'price'),
-        'coerce': {
-            'menu': str,
-            'quantity': int,
-            'price': float
-        }
+        'coerce': {'menu': str, 'quantity': int, 'price': float},
     },
-    # 🚀 🌟 เพิ่มคีย์คู่สัญญาสำหรับเครื่องมือค้นหาข้อมูล RAG จาก S3
     'search_knowledge_base': {
         'fn': search_kb,
         'args': ('question',),
-        'coerce': {
-            'question': str
-        }
+        'coerce': {'question': str},
     },
-    # 🚀 🌟 เพิ่มบล็อกนี้ตามสไลด์เพื่อเปิดทางสัญญาให้เอเจนท์สามารถเรียกใช้ทูลดึงรายงานจากชีทจริง
     'get_yesterday_summary': {
         'fn': get_yesterday_summary,
         'args': (),
-        'coerce': {}
-    }
+        'coerce': {},
+    },
 }

@@ -3,7 +3,7 @@
 Usage:
     python caption_generator.py
 
-Reads GOOGLE_API_KEY from env. Generates a Thai caption for a milk menu item.
+Reads GOOGLE_API_KEY from .env. Generates a Thai caption for a milk menu item.
 """
 
 import os
@@ -11,6 +11,10 @@ import sys
 
 from dotenv import load_dotenv
 from google import genai
+
+# โหลด Environment Variables จากไฟล์ .env ทันทีเมื่อเรียกใช้ไฟล์
+load_dotenv(override=True)
+
 
 
 PROMPT_TEMPLATE = """\
@@ -27,19 +31,20 @@ PROMPT_TEMPLATE = """\
 
 def generate_caption(menu: str, api_key: str | None = None) -> str:
     """Generate a Thai caption for the given milk menu item."""
-    key = api_key or os.environ.get("GOOGLE_API_KEY")
+    # ดึงคีย์จาก argument หรือจากไฟล์ .env (GOOGLE_API_KEY)
+    key = api_key or os.getenv("GOOGLE_API_KEY")
     if not key:
-        raise RuntimeError("GOOGLE_API_KEY not set in env or argument")
+        raise RuntimeError("GOOGLE_API_KEY not set in .env or argument")
+    
     client = genai.Client(api_key=key)
     response = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model="gemini-2.0-flash",
         contents=PROMPT_TEMPLATE.format(menu=menu),
     )
     return response.text or ""
 
 
 def main() -> int:
-    load_dotenv()
     menu = input("เมนูที่จะโปรโมต: ").strip()
     if not menu:
         print("กรุณาใส่ชื่อเมนู")

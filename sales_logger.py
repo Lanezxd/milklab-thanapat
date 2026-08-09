@@ -1,14 +1,19 @@
 import argparse
+import base64
+from datetime import datetime, timedelta
+import json
 import os
 import sys
-import requests
-import gspread
-import base64
-import json
-from datetime import datetime, timedelta
 from dotenv import load_dotenv
+import gspread
+import requests
 
-load_dotenv()
+# โหลด Environment Variables จากไฟล์ .env
+load_dotenv(override=True)
+
+
+# ดึง GOOGLE_API_KEY จากไฟล์ .env
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 
 def append_to_sheet(menu: str, qty: int, price: float) -> dict:
@@ -24,7 +29,8 @@ def append_to_sheet(menu: str, qty: int, price: float) -> dict:
     # 2. ถ้าไม่มี Secret ให้มองหาไฟล์ JSON ในเครื่อง
     elif os.path.exists("credentials/milk-lab-0df755c40bc9.json"):
         gc = gspread.service_account(
-            filename="credentials/milk-lab-0df755c40bc9.json")
+            filename="credentials/milk-lab-0df755c40bc9.json"
+        )
 
     else:
         raise RuntimeError("ไม่พบ Credentials สำหรับเข้าถึง Google Sheets")
@@ -37,17 +43,24 @@ def append_to_sheet(menu: str, qty: int, price: float) -> dict:
     row_data = [timestamp, menu, qty, price, total]
 
     worksheet.append_row(row_data)
-    return {"timestamp": timestamp, "menu": menu, "qty": qty, "price": price, "total": total}
+    return {
+        "timestamp": timestamp,
+        "menu": menu,
+        "qty": qty,
+        "price": price,
+        "total": total,
+    }
 
 
 def send_notification(message: str) -> str:
-    """TODO 2: ส่ง message ไปยัง Telegram bot"""
+    """ส่ง message ไปยัง Telegram bot"""
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     chat_id = os.getenv("TELEGRAM_CHAT_ID")
 
     if not token or not chat_id:
         raise RuntimeError(
-            "ไม่ได้ตั้งค่า TELEGRAM_BOT_TOKEN หรือ TELEGRAM_CHAT_ID")
+            "ไม่ได้ตั้งค่า TELEGRAM_BOT_TOKEN หรือ TELEGRAM_CHAT_ID"
+        )
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     payload = {"chat_id": chat_id, "text": message}
@@ -71,7 +84,8 @@ def get_yesterday_total_sales() -> str:
             gc = gspread.service_account_from_dict(creds_dict)
         elif os.path.exists("credentials/milk-lab-0df755c40bc9.json"):
             gc = gspread.service_account(
-                filename="credentials/milk-lab-0df755c40bc9.json")
+                filename="credentials/milk-lab-0df755c40bc9.json"
+            )
         else:
             return "ไม่พบ Credentials สำหรับเข้าถึง Google Sheets"
 
@@ -84,7 +98,9 @@ def get_yesterday_total_sales() -> str:
             return "ยังไม่มีข้อมูลบันทึกการขายใดๆ ในระบบตาราง"
 
         # หารูปแบบสตริงวันที่ของเมื่อวาน (ฟอร์แมต YYYY-MM-DD)
-        yesterday_str = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+        yesterday_str = (datetime.now() - timedelta(days=1)).strftime(
+            "%Y-%m-%d"
+        )
 
         total_revenue = 0.0
         total_qty = 0
@@ -94,7 +110,7 @@ def get_yesterday_total_sales() -> str:
             if len(row) >= 5:
                 timestamp = row[0]  # คอลัมน์ที่ 1 คือวันเวลาที่บันทึก
                 menu_name = row[1]  # คอลัมน์ที่ 2 คือชื่อเมนูสินค้า
-                
+
                 # 🎯 เพิ่ม Guardrail ป้องกันการดึงเอาแถว Summary Log เก่าของวันก่อนหน้ามาคำนวณซ้ำ
                 if "[Summary Log]" in menu_name or "🔔" in menu_name:
                     continue
@@ -121,8 +137,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="MilkLab Sales Logger")
     parser.add_argument("--menu", required=True, help="ชื่อเมนู")
     parser.add_argument("--qty", type=int, required=True, help="จำนวนขวด")
-    parser.add_argument("--price", type=float,
-                        required=True, help="ราคาต่อขวด")
+    parser.add_argument(
+        "--price", type=float, required=True, help="ราคาต่อขวด"
+    )
     args = parser.parse_args()
 
     # เรียก append_to_sheet
@@ -136,12 +153,16 @@ def main() -> int:
     # เรียก send_notification
     try:
         provider = send_notification(
-            f"บันทึก {args.menu} x{args.qty} = {total} บาท")
+            f"บันทึก {args.menu} x{args.qty} = {total} บาท"
+        )
         print(
-            f"[OK] บันทึกและแจ้งเตือนผ่าน {provider} เรียบร้อย ยอด {total} บาท")
+            f"[OK] บันทึกและแจ้งเตือนผ่าน {provider} เรียบร้อย ยอด {total} บาท"
+        )
     except Exception as exc:
         print(
-            f"[WARN] บันทึก Sheet สำเร็จแต่ส่งแจ้งเตือนล้มเหลว: {exc}", file=sys.stderr)
+            f"[WARN] บันทึก Sheet สำเร็จแต่ส่งแจ้งเตือนล้มเหลว: {exc}",
+            file=sys.stderr,
+        )
         return 0
 
     return 0
