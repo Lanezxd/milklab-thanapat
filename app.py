@@ -63,15 +63,31 @@ api_key = (
     st.secrets.get("GOOGLE_API_KEY")
 )
 
+# ฟังก์ชันดึง Embedding แบบรองรับหลายชื่อโมเดล (Fallback)
+def get_embedding(client, text):
+    candidate_models = ["text-embedding-004", "embedding-001"]
+    last_err = None
+    for model_name in candidate_models:
+        try:
+            res = client.models.embed_content(
+                model=model_name,
+                contents=text
+            )
+            return res.embedding.values, model_name
+        except Exception as e:
+            last_err = e
+            continue
+    raise last_err
+
 # ---------------------------------------------------------
-# 3. RAG Pipeline: Gemini Embedding (ประหยัด RAM) + FAISS
+# 3. RAG Pipeline: Gemini Embedding + FAISS Index
 # ---------------------------------------------------------
 @st.cache_resource
 def init_rag_pipeline(key: str):
     kb_path = "menu_kb.md"
     if not os.path.exists(kb_path):
         st.error(f"⚠️ ไม่พบไฟล์คลังข้อมูล {kb_path}")
-        return None, None, []
+        return None, None, [], None
 
     with open(kb_path, "r", encoding="utf-8") as f:
         text = f.read()
@@ -80,51 +96,53 @@ def init_rag_pipeline(key: str):
     chunks = [c.strip() for c in raw_chunks if c.strip()]
 
     if not key:
-        return None, None, chunks
+        return None, None, chunks, None
 
     try:
         client = genai.Client(api_key=key)
         embeddings = []
-        # แปลง Chunk เป็น Vector ผ่าน Gemini Embedding API (ไม่กิน RAM เครื่อง)
+        working_model = None
+
         for chunk in chunks:
-            res = client.models.embed_content(
-                model="text-embedding-004",
-                contents=chunk
-            )
-            embeddings.append(res.embedding.values)
+            vector, model_used = get_embedding(client, chunk)
+            embeddings.append(vector)
+            working_model = model_used
 
         embeddings_np = np.array(embeddings, dtype=np.float32)
         dimension = embeddings_np.shape[1]
         index = faiss.IndexFlatL2(dimension)
         index.add(embeddings_np)
 
-        return client, index, chunks
+        return client, index, chunks, working_model
     except Exception as e:
         st.error(f"เกิดข้อผิดพลาดในการโหลด Embedding: {str(e)}")
-        return None, None, chunks
+        return None, None, chunks, None
 
-client, index, chunks = init_rag_pipeline(api_key)
+client, index, chunks, working_model = init_rag_pipeline(api_key)
 
 # ---------------------------------------------------------
 # 4. Retrieval Function (ดึง top-k=3 Chunks)
 # ---------------------------------------------------------
 def retrieve_top_k(query: str, k: int = 3):
-    if not client or not index or not chunks:
+    if not client or not index or not chunks or not working_model:
         return []
     
-    res = client.models.embed_content(
-        model="text-embedding-004",
-        contents=query
-    )
-    query_vector = np.array([res.embedding.values], dtype=np.float32)
-    distances, indices = index.search(query_vector, k)
-    
-    retrieved_chunks = []
-    for idx in indices[0]:
-        if idx < len(chunks):
-            retrieved_chunks.append(chunks[idx])
-            
-    return retrieved_chunks
+    try:
+        res = client.models.embed_content(
+            model=working_model,
+            contents=query
+        )
+        query_vector = np.array([res.embedding.values], dtype=np.float32)
+        distances, indices = index.search(query_vector, k)
+        
+        retrieved_chunks = []
+        for idx in indices[0]:
+            if idx < len(chunks):
+                retrieved_chunks.append(chunks[idx])
+                
+        return retrieved_chunks
+    except Exception:
+        return []
 
 # ---------------------------------------------------------
 # 5. Chat State Management & UI โต้ตอบ
@@ -145,7 +163,7 @@ if user_input := st.chat_input("สอบถามข้อมูลร้าน
         st.write(user_input)
 
     retrieved_context = retrieve_top_k(user_input, k=3)
-    context_str = "\n---\n".join(retrieved_context)
+    context_str = "\n---\n".join(retrieved_context) if retrieved_context else "ไม่มีข้อมูลใน Context"
 
     prompt = f"""คุณคือผู้ช่วย AI ประจำร้าน MilkLab° ตอบคำถามลูกค้าด้วยความสุภาพ เป็นกันเอง กระชับ และถูกต้อง
 โปรดใช้ข้อมูลจาก "เอกสารอ้างอิง (Context)" ด้านล่างนี้ในการตอบคำถามเท่านั้น หากไม่มีข้อมูลใน Context ให้ตอบตามตรงว่าไม่พบข้อมูลดังกล่าวในระบบของร้าน MilkLab°
