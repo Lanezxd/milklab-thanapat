@@ -145,16 +145,32 @@ if user_input := st.chat_input("สอบถามข้อมูลร้าน
             bot_response = "⚠️ ไม่พบ API Key ในระบบ กรุณาตรวจสอบการตั้งค่า Secret บน Render ครับ"
             st.warning(bot_response)
         else:
-            try:
-                client = genai.Client(api_key=api_key)
-                response = client.models.generate_content(
-                    model="gemini-2.0-flash",
-                    contents=prompt
-                )
-                bot_response = response.text
-                st.write(bot_response)
-            except Exception as e:
-                bot_response = f"เกิดข้อผิดพลาดในการดึงคำตอบ: {str(e)}"
-                st.error(bot_response)
+            client = genai.Client(api_key=api_key)
+            
+            # ลิสต์โมเดลที่ต้องการเรียกใช้งาน (เริ่มจากรุ่นที่มี Free Quota ชัวร์ที่สุด)
+            candidate_models = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash"]
+            bot_response = None
+
+            for model_name in candidate_models:
+                try:
+                    response = client.models.generate_content(
+                        model=model_name,
+                        contents=prompt
+                    )
+                    bot_response = response.text
+                    st.write(bot_response)
+                    break  # เรียกสำเร็จแล้วให้ออกจากลูปทันที
+                except Exception as e:
+                    # ถ้าเจอ Error ติด Quota (429) ให้ลองสลับไปใช้รุ่นถัดไป
+                    if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                        continue
+                    else:
+                        bot_response = f"เกิดข้อผิดพลาดในการดึงคำตอบ: {str(e)}"
+                        st.error(bot_response)
+                        break
+
+            if not bot_response:
+                bot_response = "⏳ ระบบกำลังหนาแน่น กรุณาลองใหม่อีกครั้งในอีกสักครู่ครับ"
+                st.warning(bot_response)
 
     st.session_state.messages.append({"role": "assistant", "content": bot_response})
