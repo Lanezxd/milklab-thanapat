@@ -14,9 +14,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# ติดตั้ง Dependencies
+# ติดตั้ง Dependencies (เพิ่ม --root-user-action=ignore เพื่อซ่อนคำเตือน pip root)
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --root-user-action=ignore -r requirements.txt
 
 # คัดลอกไฟล์ทั้งหมดในโปรเจกต์
 COPY . .
@@ -24,5 +24,5 @@ COPY . .
 # เปิด Port สำหรับ Streamlit
 EXPOSE 8501
 
-# คำสั่งสำหรับรัน Streamlit
-CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+# คำสั่งสำหรับรัน Streamlit (ปิด CORS/XSRF เพื่อป้องกันปัญหาหน้าขาวบน Render)
+CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0", "--server.enableCORS=false", "--server.enableXsrfProtection=false"]
