@@ -3,14 +3,14 @@ import streamlit as st
 import faiss
 import numpy as np
 from dotenv import load_dotenv
-from sklearn.feature_extraction.text import TfidfVectorizer
-import google.generativeai as genai
+from sentence_transformers import SentenceTransformer
+from google import genai
 
-# โหลด Environment Variables
+# โหลด Environment Variables จากไฟล์ .env (ถ้ามี)
 load_dotenv()
 
 # ---------------------------------------------------------
-# 1. ตั้งค่าหน้าตา Streamlit สไตล์ มินิมอล โทนสีฟ้า-ขาว
+# 1. ตั้งค่าหน้าตา Streamlit และตกแต่งสไตล์ มินิมอล โทนสีฟ้า-ขาว
 # ---------------------------------------------------------
 st.set_page_config(
     page_title="MilkLab° RAG Chatbot",
@@ -18,11 +18,20 @@ st.set_page_config(
     layout="centered"
 )
 
+# Custom CSS ตกแต่งธีม มินิมอล (Soft Blue & Pure White)
 st.markdown("""
     <style>
-    .stApp { background-color: #F8FAFC; font-family: 'Kanit', sans-serif; }
+    /* พื้นหลังรวมและฟอนต์ */
+    .stApp {
+        background-color: #F8FAFC;
+        font-family: 'Kanit', sans-serif;
+    }
+    
+    /* ซ่อน Header / Menu ส่วนเกินเพื่อความมินิมอล */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
+    
+    /* การ์ดหัวข้อ Title */
     .title-container {
         background: linear-gradient(135deg, #E0F2FE 0%, #BAE6FD 100%);
         padding: 2rem;
@@ -31,9 +40,25 @@ st.markdown("""
         margin-bottom: 2rem;
         box-shadow: 0 4px 15px rgba(186, 230, 253, 0.4);
     }
-    .title-container h1 { color: #0284C7; font-weight: 700; margin-bottom: 0.3rem; }
-    .title-container p { color: #0369A1; font-size: 0.95rem; margin: 0; }
-    .stChatMessage { border-radius: 16px !important; padding: 1rem !important; margin-bottom: 0.8rem !important; }
+    .title-container h1 {
+        color: #0284C7;
+        font-weight: 700;
+        margin-bottom: 0.3rem;
+    }
+    .title-container p {
+        color: #0369A1;
+        font-size: 0.95rem;
+        margin: 0;
+    }
+    
+    /* กล่องข้อความแชท */
+    .stChatMessage {
+        border-radius: 16px !important;
+        padding: 1rem !important;
+        margin-bottom: 0.8rem !important;
+    }
+    
+    /* ปรับแต่งกล่อง Input พิมพ์ข้อความ */
     .stChatInputContainer > div {
         border-radius: 25px !important;
         border: 1.5px solid #BAE6FD !important;
@@ -47,6 +72,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+# ส่วนหัวของแอป (Minimal Blue Header)
 st.markdown("""
     <div class="title-container">
         <h1>🥛 MilkLab° </h1>
@@ -55,52 +81,52 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 2. RAG Pipeline: Lightweight TF-IDF + FAISS Vector Store
+# 2. RAG Pipeline: Chunking, Embedding, Vector Store (FAISS)
 # ---------------------------------------------------------
 @st.cache_resource
 def init_rag_pipeline():
     kb_path = "menu_kb.md"
     if not os.path.exists(kb_path):
-        st.error(f"⚠️ ไม่พบไฟล์คลังข้อมูล {kb_path}")
+        st.error(f"⚠️ ไม่พบไฟล์คลังข้อมูล {kb_path} กรุณาตรวจสอบโฟลเดอร์หลัก")
         return None, None, []
 
+    # 2.1 Chunking: อ่านไฟล์ menu_kb.md และแยกเป็น Chunk เล็กๆ
     with open(kb_path, "r", encoding="utf-8") as f:
         text = f.read()
 
+    # แยก Chunk ด้วยบรรทัดว่าง (\n\n)
     raw_chunks = text.split("\n\n")
     chunks = [c.strip() for c in raw_chunks if c.strip()]
 
-    # สร้าง TF-IDF Vectorizer น้ำหนักเบา
-    vectorizer = TfidfVectorizer()
-    tfidf_matrix = vectorizer.fit_transform(chunks).toarray().astype(np.float32)
+    # 2.2 Embedding: แปลง Chunk เป็น Vector ด้วย sentence-transformers
+    embedder = SentenceTransformer("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+    embeddings = embedder.encode(chunks, convert_to_numpy=True)
 
-    # สร้าง FAISS Index
-    dimension = tfidf_matrix.shape[1]
+    # 2.3 Vector Store: สร้าง FAISS Index
+    dimension = embeddings.shape[1]
     index = faiss.IndexFlatL2(dimension)
-    index.add(tfidf_matrix)
+    index.add(embeddings.astype(np.float32))
 
-    return vectorizer, index, chunks
+    return embedder, index, chunks
 
-vectorizer, index, chunks = init_rag_pipeline()
+embedder, index, chunks = init_rag_pipeline()
 
 # ---------------------------------------------------------
-# 3. Retrieval Function
+# 3. Retrieval Function (ดึง top-k=3 Chunks)
 # ---------------------------------------------------------
 def retrieve_top_k(query: str, k: int = 3):
-    if not vectorizer or not index or not chunks:
+    if not embedder or not index or not chunks:
         return []
     
-    try:
-        query_vec = vectorizer.transform([query]).toarray().astype(np.float32)
-        distances, indices = index.search(query_vec, k)
-        
-        retrieved_chunks = []
-        for idx in indices[0]:
-            if idx < len(chunks):
-                retrieved_chunks.append(chunks[idx])
-        return retrieved_chunks
-    except Exception:
-        return chunks[:k]
+    query_vector = embedder.encode([query], convert_to_numpy=True)
+    distances, indices = index.search(query_vector.astype(np.float32), k)
+    
+    retrieved_chunks = []
+    for idx in indices[0]:
+        if idx < len(chunks):
+            retrieved_chunks.append(chunks[idx])
+            
+    return retrieved_chunks
 
 # ---------------------------------------------------------
 # 4. Chat State Management & UI โต้ตอบ
@@ -110,19 +136,24 @@ if "messages" not in st.session_state:
         {"role": "assistant", "content": "สวัสดีครับ! ยินดีต้อนรับสู่ MilkLab° สอบถามเมนู ราคา เวลาเปิด-ปิด หรือส่วนผสมกับน้องมิลค์ได้เลยครับ 🥛"}
     ]
 
+# แสดงประวัติการสนทนา
 for msg in st.session_state.messages:
     avatar = "🥛" if msg["role"] == "assistant" else "👤"
     with st.chat_message(msg["role"], avatar=avatar):
         st.write(msg["content"])
 
+# ส่วนรับคำถามจากผู้ใช้
 if user_input := st.chat_input("สอบถามข้อมูลร้าน..."):
+    # บันทึกและแสดงคำถามผู้ใช้
     st.session_state.messages.append({"role": "user", "content": user_input})
     with st.chat_message("user", avatar="👤"):
         st.write(user_input)
 
+    # 4.1 Retrieval: ดึง top-k=3 chunks
     retrieved_context = retrieve_top_k(user_input, k=3)
     context_str = "\n---\n".join(retrieved_context) if retrieved_context else "ไม่มีข้อมูลใน Context"
 
+    # 4.2 สร้าง Gemini Prompt พร้อม Context
     prompt = f"""คุณคือผู้ช่วย AI ประจำร้าน MilkLab° ตอบคำถามลูกค้าด้วยความสุภาพ เป็นกันเอง กระชับ และถูกต้อง
 โปรดใช้ข้อมูลจาก "เอกสารอ้างอิง (Context)" ด้านล่างนี้ในการตอบคำถามเท่านั้น หากไม่มีข้อมูลใน Context ให้ตอบตามตรงว่าไม่พบข้อมูลดังกล่าวในระบบของร้าน MilkLab°
 
@@ -133,6 +164,7 @@ if user_input := st.chat_input("สอบถามข้อมูลร้าน
 {user_input}
 """
 
+    # 4.3 เรียก Gemini API (ดึงได้จากทั้ง Environment Variables และ Streamlit Secrets)
     api_key = (
         os.getenv("GEMINI_API_KEY") or 
         os.getenv("GOOGLE_API_KEY") or 
@@ -142,17 +174,21 @@ if user_input := st.chat_input("สอบถามข้อมูลร้าน
 
     with st.chat_message("assistant", avatar="🥛"):
         if not api_key:
-            bot_response = "⚠️ ไม่พบ API Key ในระบบ กรุณาตรวจสอบการตั้งค่า Secret บน Render ครับ"
+            bot_response = "⚠️ ไม่พบ GEMINI_API_KEY หรือ GOOGLE_API_KEY ในระบบ กรุณาตรวจสอบการตั้งค่า Secret ครับ"
             st.warning(bot_response)
         else:
             try:
-                genai.configure(api_key=api_key)
-                model = genai.GenerativeModel("gemini-1.5-flash")
-                response = model.generate_content(prompt)
+                client = genai.Client(api_key=api_key)
+                # ใช้ชื่อรุ่น gemini-2.0-flash ที่รองรับใน SDK ตัวใหม่
+                response = client.models.generate_content(
+                    model="gemini-2.0-flash",
+                    contents=prompt
+                )
                 bot_response = response.text
                 st.write(bot_response)
             except Exception as e:
                 bot_response = f"เกิดข้อผิดพลาดในการดึงคำตอบ: {str(e)}"
                 st.error(bot_response)
 
+    # บันทึกคำตอบลง Session State
     st.session_state.messages.append({"role": "assistant", "content": bot_response})
