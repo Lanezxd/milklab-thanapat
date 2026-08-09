@@ -3,6 +3,7 @@ import streamlit as st
 import faiss
 import numpy as np
 from dotenv import load_dotenv
+from sklearn.feature_extraction.text import TfidfVectorizer
 from google import genai
 
 # โหลด Environment Variables
@@ -54,40 +55,14 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 2. ดึง API Key
-# ---------------------------------------------------------
-api_key = (
-    os.getenv("GEMINI_API_KEY") or 
-    os.getenv("GOOGLE_API_KEY") or 
-    st.secrets.get("GEMINI_API_KEY") or 
-    st.secrets.get("GOOGLE_API_KEY")
-)
-
-# ฟังก์ชันดึง Embedding แบบรองรับหลายชื่อโมเดล (Fallback)
-def get_embedding(client, text):
-    candidate_models = ["text-embedding-004", "embedding-001"]
-    last_err = None
-    for model_name in candidate_models:
-        try:
-            res = client.models.embed_content(
-                model=model_name,
-                contents=text
-            )
-            return res.embedding.values, model_name
-        except Exception as e:
-            last_err = e
-            continue
-    raise last_err
-
-# ---------------------------------------------------------
-# 3. RAG Pipeline: Gemini Embedding + FAISS Index
+# 2. RAG Pipeline: Lightweight TF-IDF + FAISS Vector Store
 # ---------------------------------------------------------
 @st.cache_resource
-def init_rag_pipeline(key: str):
+def init_rag_pipeline():
     kb_path = "menu_kb.md"
     if not os.path.exists(kb_path):
         st.error(f"⚠️ ไม่พบไฟล์คลังข้อมูล {kb_path}")
-        return None, None, [], None
+        return None, None, []
 
     with open(kb_path, "r", encoding="utf-8") as f:
         text = f.read()
@@ -95,57 +70,40 @@ def init_rag_pipeline(key: str):
     raw_chunks = text.split("\n\n")
     chunks = [c.strip() for c in raw_chunks if c.strip()]
 
-    if not key:
-        return None, None, chunks, None
+    # สร้าง TF-IDF Vectorizer น้ำหนักเบา
+    vectorizer = TfidfVectorizer()
+    tfidf_matrix = vectorizer.fit_transform(chunks).toarray().astype(np.float32)
 
-    try:
-        client = genai.Client(api_key=key)
-        embeddings = []
-        working_model = None
+    # สร้าง FAISS Index
+    dimension = tfidf_matrix.shape[1]
+    index = faiss.IndexFlatL2(dimension)
+    index.add(tfidf_matrix)
 
-        for chunk in chunks:
-            vector, model_used = get_embedding(client, chunk)
-            embeddings.append(vector)
-            working_model = model_used
+    return vectorizer, index, chunks
 
-        embeddings_np = np.array(embeddings, dtype=np.float32)
-        dimension = embeddings_np.shape[1]
-        index = faiss.IndexFlatL2(dimension)
-        index.add(embeddings_np)
-
-        return client, index, chunks, working_model
-    except Exception as e:
-        st.error(f"เกิดข้อผิดพลาดในการโหลด Embedding: {str(e)}")
-        return None, None, chunks, None
-
-client, index, chunks, working_model = init_rag_pipeline(api_key)
+vectorizer, index, chunks = init_rag_pipeline()
 
 # ---------------------------------------------------------
-# 4. Retrieval Function (ดึง top-k=3 Chunks)
+# 3. Retrieval Function
 # ---------------------------------------------------------
 def retrieve_top_k(query: str, k: int = 3):
-    if not client or not index or not chunks or not working_model:
+    if not vectorizer or not index or not chunks:
         return []
     
     try:
-        res = client.models.embed_content(
-            model=working_model,
-            contents=query
-        )
-        query_vector = np.array([res.embedding.values], dtype=np.float32)
-        distances, indices = index.search(query_vector, k)
+        query_vec = vectorizer.transform([query]).toarray().astype(np.float32)
+        distances, indices = index.search(query_vec, k)
         
         retrieved_chunks = []
         for idx in indices[0]:
             if idx < len(chunks):
                 retrieved_chunks.append(chunks[idx])
-                
         return retrieved_chunks
     except Exception:
-        return []
+        return chunks[:k]
 
 # ---------------------------------------------------------
-# 5. Chat State Management & UI โต้ตอบ
+# 4. Chat State Management & UI โต้ตอบ
 # ---------------------------------------------------------
 if "messages" not in st.session_state:
     st.session_state.messages = [
@@ -175,12 +133,20 @@ if user_input := st.chat_input("สอบถามข้อมูลร้าน
 {user_input}
 """
 
+    api_key = (
+        os.getenv("GEMINI_API_KEY") or 
+        os.getenv("GOOGLE_API_KEY") or 
+        st.secrets.get("GEMINI_API_KEY") or 
+        st.secrets.get("GOOGLE_API_KEY")
+    )
+
     with st.chat_message("assistant", avatar="🥛"):
         if not api_key:
-            bot_response = "⚠️ ไม่พบ API Key ในระบบ กรุณาตรวจสอบการตั้งค่า Secret ครับ"
+            bot_response = "⚠️ ไม่พบ API Key ในระบบ กรุณาตรวจสอบการตั้งค่า Secret บน Render ครับ"
             st.warning(bot_response)
         else:
             try:
+                client = genai.Client(api_key=api_key)
                 response = client.models.generate_content(
                     model="gemini-2.0-flash",
                     contents=prompt
