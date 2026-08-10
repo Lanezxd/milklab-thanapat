@@ -83,8 +83,14 @@ def load_knowledge_chunks():
     with open(kb_path, "r", encoding="utf-8") as f:
         text = f.read()
 
-    raw_chunks = text.split("\n\n")
-    chunks = [c.strip() for c in raw_chunks if c.strip()]
+    # ✅ แก้ไข: ตัด Chunk ตามหัวข้อใหญ่ (##) เพื่อไม่ให้รายละเอียดเมนูหลุดออกจากกัน
+    raw_chunks = text.split("\n## ")
+    chunks = []
+    for idx, c in enumerate(raw_chunks):
+        if c.strip():
+            formatted_chunk = c.strip() if idx == 0 else f"## {c.strip()}"
+            chunks.append(formatted_chunk)
+
     return chunks
 
 chunks = load_knowledge_chunks()
@@ -169,7 +175,7 @@ if user_input := st.chat_input("สอบถามข้อมูลร้าน
             try:
                 client = get_genai_client(api_key)
                 response = client.models.generate_content(
-                    model="gemini-2.5-flash",  # 🎯 แก้ไขชื่อรุ่นเป็น gemini-2.5-flash
+                    model="gemini-2.5-flash",
                     contents=prompt
                 )
                 bot_response = response.text
