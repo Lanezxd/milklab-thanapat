@@ -16,7 +16,6 @@ from google import genai
 load_dotenv(override=True)
 
 
-
 PROMPT_TEMPLATE = """\
 คุณคือ social media manager ของร้าน MilkLab° ร้านนมสดกลางคืน
 
@@ -38,7 +37,7 @@ def generate_caption(menu: str, api_key: str | None = None) -> str:
     
     client = genai.Client(api_key=key)
     response = client.models.generate_content(
-        model="gemini-2.0-flash",
+        model="gemini-2.5-flash",  # 🎯 แก้ไขชื่อรุ่นเป็น gemini-2.5-flash
         contents=PROMPT_TEMPLATE.format(menu=menu),
     )
     return response.text or ""

@@ -169,7 +169,7 @@ if user_input := st.chat_input("สอบถามข้อมูลร้าน
             try:
                 client = get_genai_client(api_key)
                 response = client.models.generate_content(
-                    model="gemini-2.0-flash",
+                    model="gemini-2.5-flash",  # 🎯 แก้ไขชื่อรุ่นเป็น gemini-2.5-flash
                     contents=prompt
                 )
                 bot_response = response.text

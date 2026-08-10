@@ -46,7 +46,7 @@ def parse_command(cmd: str, api_key: str | None = None) -> dict:
     )
 
     response = client.models.generate_content(
-        model='gemini-2.0-flash',  # 🎯 แก้ไขชื่อรุ่นเป็น gemini-2.0-flash
+        model='gemini-2.5-flash',  # 🎯 แก้ไขชื่อรุ่นเป็น gemini-2.5-flash
         contents=cmd,
         config=types.GenerateContentConfig(
             system_instruction=system_instruction,
