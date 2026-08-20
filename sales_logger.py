@@ -11,13 +11,12 @@ import requests
 # โหลด Environment Variables จากไฟล์ .env
 load_dotenv(override=True)
 
-
 # ดึง GOOGLE_API_KEY จากไฟล์ .env
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 
-def append_to_sheet(menu: str, qty: int, price: float) -> dict:
-    """รองรับทั้งการอ่านไฟล์ JSON ในเครื่อง และการอ่านจาก Secret บน GitHub Actions"""
+def append_to_sheet(item: str, qty: int, price: float) -> dict:
+    """บันทึกรายการเช่า/บริการบอร์ดเกมลง Google Sheets (รองรับทั้ง Local JSON และ GitHub Actions Secret)"""
     sheet_id = os.getenv("GOOGLE_SHEETS_ID")
 
     # 1. ตรวจสอบว่ารันบน GitHub Actions หรือไม่ (ถ้ามี Secret B64)
@@ -26,12 +25,15 @@ def append_to_sheet(menu: str, qty: int, price: float) -> dict:
         creds_dict = json.loads(base64.b64decode(creds_b64))
         gc = gspread.service_account_from_dict(creds_dict)
 
-    # 2. ถ้าไม่มี Secret ให้มองหาไฟล์ JSON ในเครื่อง
+    # 2. ถ้าไม่มี Secret ให้มองหาไฟล์ JSON ในเครื่อง (fallback ค้นหาไฟล์ credentials)
+    elif os.path.exists("credentials/boardgame-haven-creds.json"):
+        gc = gspread.service_account(
+            filename="credentials/boardgame-haven-creds.json"
+        )
     elif os.path.exists("credentials/milk-lab-0df755c40bc9.json"):
         gc = gspread.service_account(
             filename="credentials/milk-lab-0df755c40bc9.json"
         )
-
     else:
         raise RuntimeError("ไม่พบ Credentials สำหรับเข้าถึง Google Sheets")
 
@@ -40,12 +42,12 @@ def append_to_sheet(menu: str, qty: int, price: float) -> dict:
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     total = qty * price
-    row_data = [timestamp, menu, qty, price, total]
+    row_data = [timestamp, item, qty, price, total]
 
     worksheet.append_row(row_data)
     return {
         "timestamp": timestamp,
-        "menu": menu,
+        "item": item,
         "qty": qty,
         "price": price,
         "total": total,
@@ -53,7 +55,7 @@ def append_to_sheet(menu: str, qty: int, price: float) -> dict:
 
 
 def send_notification(message: str) -> str:
-    """ส่ง message ไปยัง Telegram bot"""
+    """ส่งข้อความแจ้งเตือนรายการไปยัง Telegram Bot"""
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     chat_id = os.getenv("TELEGRAM_CHAT_ID")
 
@@ -72,9 +74,8 @@ def send_notification(message: str) -> str:
     return "telegram"
 
 
-# 🚀 🌟 ฟังก์ชันเพิ่มเติมสำหรับคำนวณและสรุปยอดขายเมื่อวานจริงจาก Google Sheets
 def get_yesterday_total_sales() -> str:
-    """เปิดอ่าน Google Sheets และตรวจสอบข้อมูลเพื่อสรุปยอดขายของเมื่อวานย้อนหลัง 1 วัน"""
+    """เปิดอ่าน Google Sheets และคำนวณสรุปยอดรายได้/การเช่าบอร์ดเกมของเมื่อวานย้อนหลัง 1 วัน"""
     try:
         sheet_id = os.getenv("GOOGLE_SHEETS_ID")
 
@@ -82,6 +83,10 @@ def get_yesterday_total_sales() -> str:
             creds_b64 = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_B64")
             creds_dict = json.loads(base64.b64decode(creds_b64))
             gc = gspread.service_account_from_dict(creds_dict)
+        elif os.path.exists("credentials/boardgame-haven-creds.json"):
+            gc = gspread.service_account(
+                filename="credentials/boardgame-haven-creds.json"
+            )
         elif os.path.exists("credentials/milk-lab-0df755c40bc9.json"):
             gc = gspread.service_account(
                 filename="credentials/milk-lab-0df755c40bc9.json"
@@ -95,68 +100,62 @@ def get_yesterday_total_sales() -> str:
         # ดึงแถวข้อมูลทั้งหมดในแผ่นงาน
         all_rows = worksheet.get_all_values()
         if len(all_rows) <= 1:
-            return "ยังไม่มีข้อมูลบันทึกการขายใดๆ ในระบบตาราง"
+            return "ยังไม่มีข้อมูลบันทึกรายการในระบบตาราง"
 
-        # หารูปแบบสตริงวันที่ของเมื่อวาน (ฟอร์แมต YYYY-MM-DD)
-        yesterday_str = (datetime.now() - timedelta(days=1)).strftime(
-            "%Y-%m-%d"
-        )
+        # วันที่เมื่อวาน (YYYY-MM-DD)
+        yesterday_str = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
 
         total_revenue = 0.0
         total_qty = 0
 
-        # วนลูปตรวจสอบข้อมูลตั้งแต่แถวที่ 2 เป็นต้นไป (ข้ามหัวตาราง index 0)
+        # วนลูปตรวจสอบข้อมูลตั้งแต่แถวที่ 2 เป็นต้นไป
         for row in all_rows[1:]:
             if len(row) >= 5:
-                timestamp = row[0]  # คอลัมน์ที่ 1 คือวันเวลาที่บันทึก
-                menu_name = row[1]  # คอลัมน์ที่ 2 คือชื่อเมนูสินค้า
+                timestamp = row[0]  # วันเวลา
+                item_name = row[1]  # ชื่อเกม / ประเภทบริการ
 
-                # 🎯 เพิ่ม Guardrail ป้องกันการดึงเอาแถว Summary Log เก่าของวันก่อนหน้ามาคำนวณซ้ำ
-                if "[Summary Log]" in menu_name or "🔔" in menu_name:
+                # Guardrail ป้องกันการดึงสรุป Log เก่ามาคำนวณซ้ำ
+                if "[Summary Log]" in item_name or "🔔" in item_name or "🎲" in item_name:
                     continue
 
                 if timestamp.startswith(yesterday_str):
                     try:
-                        # คอลัมน์ที่ 3 คือจำนวนชิ้น
-                        total_qty += int(row[2])
-                        # คอลัมน์ที่ 5 คือราคารวมสุทธิของรายการนั้น
-                        total_revenue += float(row[4])
+                        total_qty += int(row[2])      # จำนวนรายการ/ชุด
+                        total_revenue += float(row[4])  # ราคารวมสุทธิ
                     except ValueError:
                         continue
 
         if total_qty == 0:
-            return f"ยอดขายเมื่อวาน ({yesterday_str}) ยังไม่มีรายการบันทึกเข้ามาในระบบ"
+            return f"ยอดบริการและเช่าบอร์ดเกมเมื่อวาน ({yesterday_str}) ยังไม่มีรายการบันทึกเข้ามาในระบบ"
 
-        return f"สรุปยอดขายเมื่อวาน ({yesterday_str}) ขายได้รวม {total_qty} ชิ้น ยอดเงินสุทธิ {total_revenue} บาท"
+        return f"สรุปยอดร้านบอร์ดเกมเมื่อวาน ({yesterday_str}) ให้บริการไปทั้งหมด {total_qty} รายการ ยอดเงินสุทธิ {total_revenue:,.2f} บาท"
 
     except Exception as e:
-        return f"เกิดข้อผิดพลาดในการคำนวณรายงานยอดขาย: {str(e)}"
+        return f"เกิดข้อผิดพลาดในการคำนวณรายงานยอดรายได้: {str(e)}"
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="MilkLab Sales Logger")
-    parser.add_argument("--menu", required=True, help="ชื่อเมนู")
-    parser.add_argument("--qty", type=int, required=True, help="จำนวนขวด")
-    parser.add_argument(
-        "--price", type=float, required=True, help="ราคาต่อขวด"
-    )
+    parser = argparse.ArgumentParser(description="BoardGame Haven Sales & Service Logger")
+    parser.add_argument("--item", "--menu", dest="item", required=True, help="ชื่อบอร์ดเกม หรือประเภทบริการ (เช่น Catan, Day Pass)")
+    parser.add_argument("--qty", type=int, required=True, help="จำนวนชุด/จำนวนชั่วโมง/จำนวนคน")
+    parser.add_argument("--price", type=float, required=True, help="ราคาต่อหน่วย/ต่อวัน")
     args = parser.parse_args()
 
-    # เรียก append_to_sheet
+    # บันทึกข้อมูลลง Google Sheets
     try:
-        row = append_to_sheet(args.menu, args.qty, args.price)
+        row = append_to_sheet(args.item, args.qty, args.price)
         total = row["total"]
     except Exception as exc:
         print(f"[ERROR] บันทึก Sheet ล้มเหลว: {exc}", file=sys.stderr)
         return 1
 
-    # เรียก send_notification
+    # ส่งแจ้งเตือนผ่าน Telegram Bot
     try:
         provider = send_notification(
-            f"บันทึก {args.menu} x{args.qty} = {total} บาท"
+            f"🎲 [BoardGame Haven] บันทึกรายการ: {args.item} x{args.qty} = {total:,.2f} บาท"
         )
         print(
-            f"[OK] บันทึกและแจ้งเตือนผ่าน {provider} เรียบร้อย ยอด {total} บาท"
+            f"[OK] บันทึกและแจ้งเตือนผ่าน {provider} เรียบร้อย ยอดรวม {total:,.2f} บาท"
         )
     except Exception as exc:
         print(

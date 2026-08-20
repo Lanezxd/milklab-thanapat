@@ -1,8 +1,8 @@
-name: MilkLab Sales Logger Automation
+name: BoardGame Haven Morning Report Automation
 on:
   schedule:
     - cron: "0 0 * * *" # รันทุกเที่ยงคืน UTC (หรือ 7 โมงเช้าไทย)
-  workflow_dispatch:     # อนุญาตให้คุณกดรันด้วยมือเองได้ด้วย
+  workflow_dispatch:     # อนุญาตให้กดรันด้วยมือเพื่อทดสอบได้
 
 jobs:
   run-logger:
@@ -12,10 +12,10 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: '3.11' }
       
-      # 🌟 ติดตั้ง gspread และ requests สำหรับต่อฐานข้อมูลและยิง API
+      # ติดตั้งแพ็กเกจที่จำเป็น
       - run: pip install gspread python-dotenv requests
       
-      - name: Run Sales Logger Morning Report
+      - name: Run BoardGame Haven Morning Report
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -27,38 +27,41 @@ jobs:
           import re
 
           try:
-              # 1. ดึงรายงานแบบข้อความจริงของเมื่อวาน
+              # 1. ดึงรายงานสรุปยอดของเมื่อวาน
               report = sales_logger.get_yesterday_total_sales()
               print(f"Fetching Report: {report}")
               
-              # 2. ยิงแจ้งเตือนข้อความรายงานตัวเลขเข้าห้องแชท Telegram
-              sales_logger.send_notification(f"🔔 [Morning Report]\n{report}")
+              # 2. ยิงแจ้งเตือนสรุปยอดเข้า Telegram
+              sales_logger.send_notification(f"🎲 [BoardGame Haven Morning Report]\n{report}")
               print("Telegram Notification Sent Successfully!")
               
-              # 3. 🎯 ค้นหาตัวเลขแบบเจาะจงตำแหน่งเพื่อไม่ให้หลงกับเลขวันที่
-              match_qty = re.search(r"ขายได้รวม\s*(\d+)", report)
-              match_rev = re.search(r"ยอดเงินสุทธิ\s*([\d\.]+)", report)
+              # 3. สกัดตัวเลขจำนวนรายการและยอดเงิน (รองรับทั้งแบบมี/ไม่มี comma)
+              match_qty = re.search(r"(?:ให้บริการไปทั้งหมด|ขายได้รวม)\s*(\d+)", report)
+              match_rev = re.search(r"ยอดเงินสุทธิ\s*([\d,]+\.?\d*)", report)
               
               if match_qty and match_rev:
-                  actual_qty = int(match_qty.group(1))         # แกะได้เลขชิ้น (เช่น 37)
-                  actual_revenue = float(match_rev.group(1))   # แกะได้เลขเงิน (เช่น 2870.0)
-                  # คำนวณหาราคาเฉลี่ย เพื่อให้ระบบ append_to_sheet คูณกลับมาได้ยอดรวมสุทธิที่ถูกต้อง
+                  actual_qty = int(match_qty.group(1))
+                  rev_str = match_rev.group(1).replace(",", "")
+                  actual_revenue = float(rev_str)
                   unit_price = actual_revenue / actual_qty if actual_qty > 0 else 0.0
               else:
                   actual_qty = 0
                   unit_price = 0.0
               
-              # 4. บันทึกข้อมูลลง Google Sheets แบบแยกช่องคอลัมน์อย่างแม่นยำ
-              sales_logger.append_to_sheet(
-                  menu="🔔 [Summary Log] ยอดขายรวมประจำวัน", 
-                  qty=actual_qty, 
-                  price=unit_price
-              )
-              print(f"Successfully appended Row: Qty={actual_qty}, Total={actual_qty * unit_price}")
+              # 4. บันทึกแถวสรุปยอดประจำวันลง Google Sheets
+              if actual_qty > 0:
+                  sales_logger.append_to_sheet(
+                      item="🎲 [Summary Log] สรุปยอดบริการและเช่าบอร์ดเกมประจำวัน", 
+                      qty=actual_qty, 
+                      price=unit_price
+                  )
+                  print(f"Successfully appended Row: Qty={actual_qty}, Total={actual_qty * unit_price}")
+              else:
+                  print("No sales recorded yesterday, skipped sheet append.")
               
           except Exception as e:
               print(f"Error occurred: {e}")
           EOF
 
-          # 🚀 สั่งรันสคริปต์ Python
+          # รันสคริปต์รายงาน
           python3 run_report.py

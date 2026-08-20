@@ -1,23 +1,23 @@
-name: Daily Sales Logger
+name: BoardGame Haven Daily Sales & Service Logger
 
 on:
   schedule:
-    # 13:00 UTC = 20:00 ICT (Thailand)
+    # 13:00 UTC = 20:00 ICT (เวลาปิดร้านบอร์ดเกม)
     - cron: '0 13 * * *'
   workflow_dispatch:
     inputs:
-      menu:
-        description: 'ชื่อเมนู'
+      item:
+        description: 'ชื่อบอร์ดเกม หรือประเภทบริการ (เช่น Catan, Day Pass)'
         required: true
-        default: 'นมหมีฮอกไกโด'
+        default: 'Catan'
       qty:
-        description: 'จำนวน'
+        description: 'จำนวนชุด / จำนวนคน'
         required: true
         default: '1'
       price:
-        description: 'ราคา'
+        description: 'ราคาต่อหน่วย / ต่อวัน (บาท)'
         required: true
-        default: '65'
+        default: '120'
 
 jobs:
   log-sale:
@@ -34,12 +34,14 @@ jobs:
 
       - name: Run sales_logger
         env:
+          GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON_B64: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON_B64 }}
           GOOGLE_SHEETS_CREDENTIALS: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           LINE_CHANNEL_TOKEN: ${{ secrets.LINE_CHANNEL_TOKEN }}
         run: |
           python sales_logger.py \
-            --menu "${{ github.event.inputs.menu || 'นมหมีฮอกไกโด' }}" \
+            --item "${{ github.event.inputs.item || 'Catan' }}" \
             --qty ${{ github.event.inputs.qty || 1 }} \
-            --price ${{ github.event.inputs.price || 65 }}
+            --price ${{ github.event.inputs.price || 120 }}
